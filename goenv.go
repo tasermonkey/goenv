@@ -2,6 +2,7 @@ package goenv
 
 import (
 	"github.com/adjust/go-gypsy/yaml"
+	"io"
 	"log"
 	"os"
 	"path"
@@ -31,6 +32,9 @@ func NewGoenv(configFile, environment, logFile string) *Goenv {
 	if logFile == "" {
 		logFile = goenv.Get("log_file", "./log/server.log")
 		os.MkdirAll(path.Dir(logFile), 0755)
+		setLogFileAndAlsoStdOut(logFile)
+	} else {
+		os.MkdirAll(path.Dir(logFile), 0755)
 		setLogFile(logFile)
 	}
 
@@ -49,7 +53,7 @@ func TestGoenv() *Goenv {
 	return NewGoenv(configFile, environment, "")
 }
 
-func setLogFile(fileName string) {
+func getLogWriter(fileName string) (logFile io.Writer) {
 	if fileName == "nil" {
 		return
 	}
@@ -58,6 +62,18 @@ func setLogFile(fileName string) {
 	if err != nil {
 		panic("goenv failed to open logFile: " + fileName)
 	}
+	return
+}
+
+func setLogFile(fileName string) {
+	logFile := getLogWriter(fileName)
+	log.SetOutput(logFile)
+	log.SetFlags(5)
+}
+
+func setLogFileAndAlsoStdOut(fileName string) {
+	logFile := getLogWriter(fileName)
+	logFile = io.MultiWriter(logFile, os.Stdout)
 	log.SetOutput(logFile)
 	log.SetFlags(5)
 }
@@ -69,6 +85,30 @@ func (goenv *Goenv) Get(spec, defaultValue string) string {
 		value = defaultValue
 	}
 	return value
+}
+
+// get value from current environment
+func (goenv *Goenv) GetFailToEnv(spec, defaultValue string) string {
+	value, err := goenv.configFile.Get(goenv.environment + "." + spec)
+	if err != nil {
+		value = GetEnv(spec, defaultValue)
+	}
+	return value
+}
+
+func (goenv *Goenv) GetIntFailToEnv(spec string, defaultValue int) int {
+	str := goenv.Get(spec, "")
+	if str == "" {
+		str = GetEnv(spec, "")
+		if str == "" {
+			return defaultValue
+		}
+	}
+	val, err := strconv.Atoi(str)
+	if err != nil {
+		log.Panic("goenv GetInt failed Atoi", goenv.environment, spec, str)
+	}
+	return val
 }
 
 func (goenv *Goenv) GetInt(spec string, defaultValue int) int {
@@ -102,6 +142,26 @@ func (goenv *Goenv) Require(spec string) string {
 		log.Panicf("goenv Require couldn't find %s.%s", goenv.environment, spec)
 	}
 	return value
+}
+
+func (goenv *Goenv) RequireFailToEnv(spec string) string {
+	value := goenv.GetFailToEnv(spec, "")
+	if value == "" {
+		log.Panicf("goenv Require couldn't find %s.%s", goenv.environment, spec)
+	}
+	return value
+}
+
+func (goenv *Goenv) RequireIntFailToEnv(spec string) int {
+	str := goenv.RequireFailToEnv(spec)
+	if str == "" {
+		return 0
+	}
+	val, err := strconv.Atoi(str)
+	if err != nil {
+		log.Panic("goenv RequireInt failed Atoi", goenv.environment, spec, str)
+	}
+	return val
 }
 
 func (goenv *Goenv) RequireInt(spec string) int {
